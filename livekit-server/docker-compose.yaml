@@ -1,0 +1,18 @@
+# docker-compose.yaml
+services:
+  livekit:
+    image: livekit/livekit-server:latest
+    container_name: livekit
+    command: --config /etc/livekit.yaml
+    ports:
+      # HTTP signaling
+      - "7880:7880"
+      # TCP fallback
+      - "7881:7881"
+      # TURN
+      - "3478:3478/udp"
+      # Controlled media port range
+      - "50100-50150:50100-50150/udp"
+    volumes:
+      - ./livekit.yaml:/etc/livekit.yaml
+    restart: unless-stopped

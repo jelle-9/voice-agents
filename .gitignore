@@ -1,0 +1,16 @@
+# Ignore virtual environments
+venv/
+__pycache__/
+
+# Sensitive info
+*.env
+
+# Model data
+models/
+*.gguf
+*.bin
+
+# Docker volumes/logs
+*.log
+*.pid
+livekit-server/volume/
