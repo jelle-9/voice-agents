@@ -2,3 +2,4 @@ livekit-agents[openai,silero,turn-detector]
 python-dotenv
 requests
 faster-whisper
+numpy

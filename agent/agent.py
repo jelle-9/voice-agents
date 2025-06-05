@@ -1,52 +1,81 @@
 import asyncio
 from dotenv import load_dotenv
 import logging
+import os
 
 from livekit.agents import cli, AgentSession, Agent, JobContext, WorkerOptions
-from livekit.plugins import openai, silero # openai is for the Ollama connection
+# Correct way to import the LLM plugin class
+from livekit.plugins.openai import LLM as OpenAI_LLM # Alias to avoid conflict with openai module
+from livekit.plugins import silero
+from openai import AsyncOpenAI # Import the AsyncOpenAI client
 
-# Assuming stt_custom.py is in the same directory
 from stt_custom import CustomSTT
 
 load_dotenv()
 
-# Configure basic logging for the agent
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger("agent_script")
 
 async def entrypoint(ctx: JobContext):
-    logger.info(f"Agent connecting to room: {ctx.room.name} with identity: {ctx.participant.identity}")
-    await ctx.connect()
-    logger.info("Agent connected successfully.")
+    agent_identity = os.getenv("LIVEKIT_IDENTITY", "default-agent-identity")
+    logger.info(f"Agent job received. Room: {ctx.room.name}, Configured Identity: {agent_identity}")
 
-    # Initialize STT. You can change model_size, device, etc.
-    # For your GTX 1060, 'base' or 'small' on GPU ('cuda', 'float16') is a good start.
-    # If GPU struggles, try 'cpu' and 'int8'.
-    stt_service = CustomSTT(model_size="base", device="cuda", compute_type="float16", language="de")
+    await ctx.connect()
+    logger.info(f"Agent connected to LiveKit server. Room: {ctx.room.name}, Actual Agent Identity: {ctx.agent.identity if ctx.agent else agent_identity}")
+
+    stt_service = CustomSTT(model_size="base", device="cpu", compute_type="int8", language="de")
+    logger.info("STT service initialized.")
+
+    # Explicitly create an OpenAI client configured for Ollama
+    ollama_client = AsyncOpenAI(
+        base_url=os.getenv("OPENAI_API_BASE"), # Should be http://localhost:11434/v1
+        api_key=os.getenv("OPENAI_API_KEY")    # Should be "ollama"
+    )
+    logger.info(f"OpenAI client configured for Ollama at: {os.getenv('OPENAI_API_BASE')}")
 
     session = AgentSession(
         vad=silero.VAD.load(),
-        llm=openai.LLM(), # Uses local Ollama via OPENAI_API_BASE from .env
+        llm=OpenAI_LLM(
+            model="mistral", # Specify the Ollama model name
+            client=ollama_client # Pass the pre-configured client
+        ),
         stt=stt_service,
-        tts=None # We'll add local TTS later
+        tts=None # TTS is still None, will cause assertion error later
     )
+    logger.info("AgentSession created with VAD, LLM, STT.")
 
-    logger.info("AgentSession created. Starting session...")
-    agent = Agent(instructions="You are a helpful AI voice assistant for German. Answer clearly and concisely in German.")
+    # ... (rest of your agent.py code: agent_instance, event handlers, session.start) ...
+    agent_instance = Agent(
+        instructions="You are a helpful AI voice assistant for German. Answer clearly and concisely in German."
+    )
+    logger.info("Agent instance created.")
 
+    @session.on("track_subscribed")
+    def on_track_subscribed_sync(track, publication, participant):
+        logger.info(f"Participant {participant.identity} subscribed to track {track.sid} ({track.kind})")
+        if track.kind == "audio":
+            logger.info(f"Audio track subscribed from {participant.identity}. AgentSession will now process this audio.")
+
+    @session.on("stt_update")
+    def on_stt_update_sync(text: str, final: bool):
+        logger.info(f"STT Update: '{text}', Final: {final}")
+        if final:
+            logger.info(f"Final STT Result: '{text}' - This will be sent to LLM.")
+
+    @session.on("llm_response")
+    def on_llm_response_sync(text: str, final: bool):
+        logger.info(f"LLM Response: '{text}', Final: {final}")
+        if final:
+            logger.info(f"Final LLM Response: '{text}' - This would be sent to TTS if implemented.")
+
+    logger.info(f"Starting agent session in room '{ctx.room.name}'...")
     try:
-        await session.start(room=ctx.room, agent=agent)
-        # Keep the agent running until a disconnect or error
-        # session.start is not a blocking call in the same way as run, so we might need to keep it alive.
-        # The cli.run_app handles the lifecycle for us usually.
-        logger.info("Agent session started. Listening for events...")
+        await session.start(room=ctx.room, agent=agent_instance)
+        logger.info(f"Agent session started successfully in room '{ctx.room.name}'. Listening for participants...")
     except Exception as e:
         logger.error(f"Error during agent session start: {e}")
+        raise
 
 if __name__ == "__main__":
-    # This sets up the CLI and worker options.
-    # The .env file should define LIVEKIT_ROOM and LIVEKIT_IDENTITY for the 'dev' command.
-    # e.g., LIVEKIT_ROOM=test
-    #       LIVEKIT_IDENTITY=ai-german-agent
-    logging.info("Starting LiveKit Agent CLI...")
+    logger.info("Starting LiveKit Agent CLI...")
     cli.run_app(WorkerOptions(entrypoint_fnc=entrypoint))
