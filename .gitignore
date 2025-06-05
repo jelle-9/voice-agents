@@ -14,3 +14,6 @@ models/
 *.log
 *.pid
 livekit-server/volume/
+
+agent/.env
+agent/venv/
