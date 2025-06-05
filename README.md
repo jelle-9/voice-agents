@@ -34,7 +34,10 @@ Ensure you have the following software installed on your system (Linux, e.g., Ub
 
 ## Directory Structure
 
-voice-agents/
+(Assuming this `README.md` is at the root of the `voice-agents` project directory)
+
+```text
+./
 ├── agent/                     # Python voice agent logic, venv, and custom STT/TTS
 │   ├── agent.py
 │   ├── stt_custom.py
@@ -49,7 +52,7 @@ voice-agents/
 │   ├── docker-compose.yaml
 │   └── livekit.yaml
 └── README.md                  # This file
-
+```
 ## Setup and Running Instructions
 
 **Important**: Before starting, navigate to the root directory where you cloned this `voice-agents` project. All `cd` commands below will assume you are starting from this project root, unless specified otherwise.
