@@ -10,6 +10,7 @@ from livekit.plugins import silero
 from openai import AsyncOpenAI # Import the AsyncOpenAI client
 
 from stt_custom import CustomSTT
+from tts_custom import DummyTTS
 
 load_dotenv()
 
@@ -31,7 +32,10 @@ async def entrypoint(ctx: JobContext):
         base_url=os.getenv("OPENAI_API_BASE"), # Should be http://localhost:11434/v1
         api_key=os.getenv("OPENAI_API_KEY")    # Should be "ollama"
     )
-    logger.info(f"OpenAI client configured for Ollama at: {os.getenv('OPENAI_API_BASE')}")
+    logger.info(f"OpenAI client configured for Ollama. Base URL: {os.getenv('OPENAI_API_BASE')}, API Key: {os.getenv('OPENAI_API_KEY')}")
+    
+    tts_service = DummyTTS()
+    logger.info("Dummy TTS service initialized.")
 
     session = AgentSession(
         vad=silero.VAD.load(),
@@ -40,7 +44,7 @@ async def entrypoint(ctx: JobContext):
             client=ollama_client # Pass the pre-configured client
         ),
         stt=stt_service,
-        tts=None # TTS is still None, will cause assertion error later
+        tts=tts_service
     )
     logger.info("AgentSession created with VAD, LLM, STT.")
 
