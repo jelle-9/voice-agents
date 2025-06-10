@@ -6,31 +6,32 @@ This project demonstrates a locally runnable voice agent pipeline using LiveKit 
 
 * **LiveKit Server**: Self-hosted for managing WebRTC sessions.
 * **Local STT**: Custom `faster-whisper` integration for German speech-to-text (runs on CPU).
-* **Local LLM**: Uses Ollama (e.g., with the `mistral` model) for text generation, accessed via an OpenAI-compatible API.
-* **Python Agent**: `livekit-agents` based Python application that orchestrates VAD, STT, and LLM.
+    * Includes automatic audio resampling from various input sample rates to the required 16kHz for high accuracy.
+* **Local LLM**: Confirmed working integration with Ollama (e.g., with the `mistral` model) for text generation, accessed via an OpenAI-compatible API.
+* **Python Agent**: `livekit-agents` based Python application that orchestrates a full VAD-STT-LLM pipeline.
 * **Web Frontend**: A Next.js example from `livekit/components-js` for interacting with the agent.
-* **Text-based Interaction**: Currently, the agent processes voice to text, gets an LLM response as text (logged to console), and does not yet have audible speech output (TTS is a dummy).
+* **Text-based Interaction**: The agent reliably processes voice to text and gets a text response from the LLM, which is logged to the console.
 
 ## Prerequisites
 
-Ensure you have the following software installed on your system (Linux, e.g., Ubuntu/Mint):
+Ensure you have the following software installed on your system (primarily tested on Linux, e.g., Ubuntu/Mint):
 
 1.  **Docker & Docker Compose**: For running the LiveKit server.
     * [Install Docker](https://docs.docker.com/engine/install/)
     * [Install Docker Compose](https://docs.docker.com/compose/install/)
 2.  **Python**: Version 3.12.x is used in this project.
-    * `python3 --version`
-    * `pip --version`
-    * `python3-venv` package (e.g., `sudo apt install python3.12-venv`)
+    * Check with: `python3 --version`
+    * Check with: `pip --version`
+    * Ensure the `python3-venv` package (or equivalent for your Python version) is installed (e.g., `sudo apt install python3.12-venv` on Debian/Ubuntu).
 3.  **Node.js and pnpm**: For running the frontend example.
-    * Node.js (e.g., v18+): `node --version`
-    * npm (comes with Node.js): `npm --version`
-    * pnpm: `sudo npm install -g pnpm`
+    * Node.js (e.g., v18+ recommended): Check with `node --version`
+    * npm (comes with Node.js): Check with `npm --version`
+    * pnpm: Install globally with `sudo npm install -g pnpm`
 4.  **Ollama**: For running local LLMs.
     * [Install Ollama](https://ollama.com/download)
 5.  **Git**: For version control and cloning repositories.
-6.  **Build Essentials & CMake** (for STT components if built from source, already done for `faster-whisper` via pip):
-    * `sudo apt install build-essential cmake` (likely already done during previous steps)
+6.  **Build Essentials & CMake**:
+    * Install with: `sudo apt install build-essential cmake`
 
 ## Directory Structure
 
@@ -96,6 +97,16 @@ Each main component (Ollama, LiveKit Server, Python Agent, Frontend) typically r
     ```
     *(For subsequent runs, just activate it: `source venv/bin/activate`)*
 * **Install Python dependencies**:
+    Your `requirements.txt` should look like this:
+    ```txt
+    livekit-agents[openai,silero,turn-detector]
+    python-dotenv
+    requests
+    faster-whisper
+    numpy
+    resampy
+    ```
+    Install with:
     ```bash
     pip install -r requirements.txt
     ```
@@ -117,7 +128,7 @@ Each main component (Ollama, LiveKit Server, Python Agent, Frontend) typically r
     ```bash
     python agent.py dev
     ```
-* Keep this terminal open. You should see logs indicating it started, connected to LiveKit, and loaded STT.
+* Keep this terminal open.
 
 **4. Set Up and Run the Frontend Example**
 
@@ -150,68 +161,42 @@ Each main component (Ollama, LiveKit Server, Python Agent, Frontend) typically r
     LIVEKIT_API_KEY=devkey
     LIVEKIT_API_SECRET=secret
     ```
-    * **Important**: Replace `<your-laptop-ip>` with the actual Local Area Network (LAN) IP address of the machine running the LiveKit server.
-        * On Linux, you can usually find this by running `ip addr show` in the terminal and looking for the `inet` address under your active network interface (e.g., `eth0` or `wlan0`).
-        * Do **not** use `localhost` or `127.0.0.1` for this variable if you intend to test the frontend from *other devices* on your network. If testing the browser on the *same machine*, `ws://localhost:7880` can be used.
+    * **Important**: Replace `<your-laptop-ip>` with the actual Local Area Network (LAN) IP address of the machine running the LiveKit server. On Linux, find this with `ip addr show`. Do **not** use `localhost` or `127.0.0.1` for this variable if you intend to test the frontend from *other devices* on your network.
 * **Run the frontend development server**:
-    Use the command that worked for you (likely `pnpm dev:next` which runs `turbo run dev --filter=@livekit/component-example-next...`, or try `pnpm run dev` directly in this directory).
+    The command `pnpm dev:next` (which runs `turbo run dev --filter=@livekit/component-example-next...`) worked for you previously. If that script doesn't exist, `pnpm run dev` is the standard fallback.
     ```bash
     pnpm dev:next
     ```
-    (If `dev:next` is not a script in this example's `package.json`, try `pnpm run dev`)
-* This will typically start the server on `http://localhost:3000`. Keep this terminal open.
+* This will start the server on `http://localhost:3000`. Keep this terminal open.
 
 ## How to Test
 
-1.  Ensure all four components are running in their respective terminals:
-    * Ollama server.
-    * LiveKit server (Docker).
-    * Python voice agent (`agent.py dev`).
-    * Frontend example (`pnpm dev:next` or `pnpm run dev`).
+1.  Ensure all four components are running in their respective terminals.
 2.  Open a web browser.
-3.  Navigate to the voice assistant example page. You need to provide the `room` and `user` URL parameters to match your agent's configuration and assign a user identity:
+3.  Navigate to the voice assistant example page, providing the `room` and `user` URL parameters:
     `http://<your-laptop-ip>:3000/voice-assistant?room=test-german-agent&user=YourName`
-    * Replace `<your-laptop-ip>` with the IP of the machine running the frontend dev server (if accessing from another device). If on the same machine, `localhost` can be used:
-    `http://localhost:3000/voice-assistant?room=test-german-agent&user=YourName`
-    * Replace `YourName` with any desired user display name.
-4.  Click the "Connect" button on the webpage (if present for the specific example page).
-5.  Allow microphone permissions in your browser when prompted.
+    *(If accessing from the same machine where the frontend is running, you can use `localhost` in place of `<your-laptop-ip>`)*
+4.  Click the "Connect" button (if present).
+5.  Allow microphone permissions in your browser.
 6.  Speak in German.
-7.  **Observe**:
-    * **Frontend**: UI should indicate connection and audio activity.
-    * **Python Agent Terminal**: You should see detailed logs:
-        * Participant joining.
-        * STT processing your speech (e.g., `INFO:stt_custom:STT Transcription result: '...'`).
-        * The final STT result being passed to the LLM (`INFO:agent_script:Final STT Result: '...'`).
-        * The LLM's text response (e.g.,`INFO:agent_script:Final LLM Text Response: '...'`).
-        * The DummyTTS receiving the text (`INFO:tts_custom:DummyTTS: Received text to synthesize: '...'`).
+7.  **Observe**: In the Python Agent Terminal, you should see a clean sequence of logs showing your speech being transcribed, sent to the LLM, and the final text response from the LLM being logged.
 
 ## Current Status & Next Steps
 
 * **Working**:
-    * LiveKit server connection.
-    * VAD (Voice Activity Detection) via Silero.
-    * Local STT (German, `faster-whisper` on CPU) via custom wrapper is transcribing speech.
-    * Frontend connection to LiveKit server.
-* **Partially Working / Next to Verify**:
-    * LLM integration with local Ollama: The agent is configured to use it. Logs need to be checked for successful LLM responses.
-* **To Do / Areas for Improvement**:
-    * **Verify LLM Connection & Response**: Ensure Ollama receives requests and its text responses are logged correctly by the agent.
-    * **Implement Real Local TTS**: Replace `DummyTTS` with a functional local TTS engine (e.g., Piper TTS, or investigate Coqui TTS Python 3.12 solutions like building from source or alternative packages) and integrate it by implementing the `livekit.agents.tts.TTS` interface for audio frame streaming.
-    * **STT Audio Resampling**: The STT can receive audio at sample rates other than 16kHz (e.g., 24kHz was observed). Implement resampling in `CustomSTT` to 16kHz before passing to `faster-whisper` for optimal accuracy.
-    * **STT on GPU**: Revisit running `faster-whisper` on GPU for better performance once the CPU pipeline is stable.
-    * **Error Handling**: Enhance error handling and resilience in the agent and custom components.
-    * **Frontend Customization**: Adapt or replace the example frontend for a more specific use case.
-    * **Configuration**: Make component configurations (model paths, TTS voices, etc.) more flexible (e.g., via environment variables or a config file for the agent).
-    * **Dockerize Agent**: Consider Dockerizing the Python agent and its dependencies.
+    * VAD-STT-LLM text pipeline is stable and functional.
+    * Local STT with `faster-whisper` provides accurate transcription thanks to audio resampling.
+    * Local LLM with Ollama is successfully integrated and responsive.
+    * Custom agent components (`CustomSTT`, `DummyTTS`) correctly implement the necessary `livekit-agents` interfaces to prevent crashes.
+* **Next Steps / To Do**:
+    * **Implement Real Local TTS**: This is the top priority. Replace `DummyTTS` with a functional local TTS engine (e.g., Piper TTS) to make the agent speak.
+    * **GPU Acceleration**: Revisit running STT and LLM on the GPU to improve performance and reduce CPU load.
+    * **Frontend Improvements**: Display the conversation (transcripts and LLM responses) in the web UI.
+    * **Configuration**: Make component settings like model names and paths more flexible.
+    * **Dockerize Agent**: Consider Dockerizing the Python agent for easier deployment.
 
 ## Troubleshooting Notes
 
 * **Module Not Found (Frontend)**: If errors like `Can't resolve '@livekit/components-styles'` occur, ensure `pnpm install` and then `pnpm build` were run from the root of the `livekit-frontend-example` monorepo. Also, try clearing the `.next` cache (`rm -rf .next`) in the `examples/nextjs` directory.
-* **Python Package Installation (`TTS`)**: The Coqui `TTS` package (as of June 2025 via `pip install TTS`) has shown Python version constraints incompatible with Python 3.12. This README currently uses a `DummyTTS`. Alternative TTS solutions compatible with Python 3.12 (like Piper TTS or newer Coqui distributions if available) would need their own setup steps.
-* **LLM Connection Issues**: Confirm `OPENAI_API_BASE` in `agent/.env` points to your Ollama server's OpenAI-compatible endpoint (e.g., `http://localhost:11434/v1`). Ensure `agent.py` correctly initializes and uses the `AsyncOpenAI` client with this base URL. Check Ollama server logs.
-* **Firewall**: Ensure your OS firewall isn't blocking local network connections to ports used by LiveKit (7880 TCP, UDP media ports like 50000-60000 or the configured range), Ollama (11434 TCP), or the frontend dev server (3000 TCP).
-* **Check all terminal logs**: Each component has its own terminal output. These are crucial for debugging.
+* **Python Version Incompatibilities**: Some libraries (like Coqui `TTS`) may have strict Python version requirements. This project was developed with Python 3.12.
 * **IP Addresses**: When using `<your-laptop-ip>` in URLs or configs, ensure it's the correct LAN IP of the host machine, reachable by other devices on the network.
-
----
