@@ -3,3 +3,4 @@ python-dotenv
 requests
 faster-whisper
 numpy
+resampy

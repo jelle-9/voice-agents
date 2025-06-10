@@ -14,8 +14,23 @@ from tts_custom import DummyTTS
 
 load_dotenv()
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+# --- NEW LOGGING SETUP ---
+# Configure a more readable format
+LOG_FORMAT = '%(asctime)s %(levelname)-8s [%(name)s] %(message)s'
+DATE_FORMAT = '%Y-%m-%d %H:%M:%S'
+
+# Set up logging for our own scripts and silence noisy libraries
+logging.basicConfig(level=logging.INFO, format=LOG_FORMAT, datefmt=DATE_FORMAT)
+logging.getLogger("livekit.agents").setLevel(logging.WARNING)
+logging.getLogger("livekit.rtc").setLevel(logging.WARNING)
+logging.getLogger("livekit").setLevel(logging.WARNING)
+logging.getLogger("urllib3").setLevel(logging.WARNING)
+logging.getLogger("faster_whisper").setLevel(logging.WARNING)
+logging.getLogger("numba").setLevel(logging.WARNING) # <-- Add this line to silence numba
+
+# Get our specific logger
 logger = logging.getLogger("agent_script")
+# --- END NEW LOGGING SETUP ---
 
 async def entrypoint(ctx: JobContext):
     agent_identity = os.getenv("LIVEKIT_IDENTITY", "default-agent-identity")
@@ -33,7 +48,7 @@ async def entrypoint(ctx: JobContext):
         api_key=os.getenv("OPENAI_API_KEY")    # Should be "ollama"
     )
     logger.info(f"OpenAI client configured for Ollama. Base URL: {os.getenv('OPENAI_API_BASE')}, API Key: {os.getenv('OPENAI_API_KEY')}")
-    
+
     tts_service = DummyTTS()
     logger.info("Dummy TTS service initialized.")
 

@@ -2,41 +2,35 @@ import asyncio
 from faster_whisper import WhisperModel
 import logging
 import numpy as np
-from dataclasses import dataclass, field # For creating simple data classes
-from typing import List, Optional # For type hinting
+import resampy
+from dataclasses import dataclass, field
+from typing import List, Optional
 
-from livekit.agents.stt import STTCapabilities # This import is valid
+from livekit.agents.stt import STTCapabilities
 from livekit.rtc import EventEmitter, AudioFrame
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("stt_custom")
 
-# Define simple data classes that mimic what StreamAdapter expects for a final result
+# Define simple data classes that mimic what StreamAdapter/AgentSession expect.
+# These have the necessary attributes to avoid the AttributeError.
 @dataclass
-class CustomSegmentData:
+class CustomSegment:
     text: str
-    start_time: int # ms
-    end_time: int   # ms
-    language: Optional[str] = None
-    # final: bool = True # Segments are part of a final result
+    start: int # ms
+    end: int   # ms
 
 @dataclass
 class CustomSTTAlternative:
     text: str
     language: Optional[str] = None
-    confidence: float = 1.0 # Default to 1.0 for faster-whisper final result
-    segments: List[CustomSegmentData] = field(default_factory=list)
-    # final: bool = True # This alternative is part of a final event
+    confidence: float = 1.0
+    segments: List[CustomSegment] = field(default_factory=list)
 
 @dataclass
 class CustomSTTEvent:
-    type: str # "final_result", "interim_result", "error"
+    type: str # "final_result" for non-streaming
     alternatives: List[CustomSTTAlternative] = field(default_factory=list)
-    # final: bool attribute might be directly on STTEvent for some SDK versions,
-    # or implied by the type/alternatives. For now, let's rely on type="final_result".
-    # The STTData object in official plugins has a 'final' attribute.
-    # Let's try without a top-level 'final' on CustomSTTEvent first.
-    # If StreamAdapter checks for event.final, we might need to add it.
+
 
 class CustomSTT(EventEmitter):
     def __init__(self, model_size="base", device="cpu", compute_type="int8", language="de"):
@@ -51,66 +45,50 @@ class CustomSTT(EventEmitter):
             logger.error(f"Error loading Whisper model: {e}")
             raise
 
-    async def recognize(self, *, buffer: AudioFrame, **kwargs) -> CustomSTTEvent: # Return our custom event type
-        language_arg = kwargs.get('language')
+    async def recognize(self, *, buffer: AudioFrame, **kwargs) -> CustomSTTEvent:
+        # We will ALWAYS use the language configured during initialization (self._language)
+        # This solves the "'NOT_GIVEN' is not a valid language code" error.
         current_transcribe_language = self._language
-
-        if language_arg is not None and language_arg != self._language:
-            logger.warning(f"Recognize called with language '{language_arg}' from StreamAdapter, "
-                           f"but CustomSTT instance is configured for '{self._language}'. "
-                           f"Using configured language: '{self._language}'.")
         
-        logger.info(f"STT Recognize called with AudioFrame. Buffer length: {len(buffer.data)}, "
-                    f"Sample rate: {buffer.sample_rate}, Channels: {buffer.num_channels}. "
-                    f"Language for transcription: {current_transcribe_language}")
+        logger.info(f"STT Recognize called with AudioFrame. Using language: {current_transcribe_language}")
+        
         try:
-            if buffer.sample_rate != 16000:
-                logger.warning(f"Input sample rate {buffer.sample_rate}Hz is not 16kHz. Transcription quality may be affected.")
-
+            # Resampling logic
             audio_int16 = np.frombuffer(buffer.data, dtype=np.int16)
             if buffer.num_channels > 1:
                 audio_int16 = audio_int16[::buffer.num_channels]
-
             audio_float32 = audio_int16.astype(np.float32) / 32768.0
 
+            if buffer.sample_rate != 16000:
+                logger.info(f"Resampling audio from {buffer.sample_rate}Hz to 16000Hz.")
+                audio_resampled = resampy.resample(audio_float32, sr_orig=buffer.sample_rate, sr_new=16000)
+            else:
+                audio_resampled = audio_float32
+
+            # Transcription logic
             loop = asyncio.get_event_loop()
             segments_generator, info = await loop.run_in_executor(
                 None,
-                lambda: self.model.transcribe(audio_float32, language=current_transcribe_language, beam_size=5)
+                lambda: self.model.transcribe(audio_resampled, language=current_transcribe_language, beam_size=5)
             )
 
-            model_detected_language = info.language
-            lang_probability = info.language_probability
-            logger.info(f"STT Detected language by model: {model_detected_language} with probability {lang_probability:.2f}")
-
-            custom_stt_segments = []
-            full_text_parts = []
+            final_text_parts = []
+            custom_segments = []
             for segment in segments_generator:
-                full_text_parts.append(segment.text)
-                custom_stt_segments.append(
-                    CustomSegmentData(
-                        text=segment.text,
-                        start_time=int(segment.start * 1000), # ms
-                        end_time=int(segment.end * 1000),     # ms
-                        language=model_detected_language
-                    )
+                final_text_parts.append(segment.text)
+                custom_segments.append(
+                    CustomSegment(text=segment.text, start=int(segment.start * 1000), end=int(segment.end * 1000))
                 )
-            
-            final_text = "".join(full_text_parts).strip()
+
+            final_text = "".join(final_text_parts).strip()
             logger.info(f"STT Transcription result: '{final_text}'")
 
-            # Construct our custom STTEvent-like object
-            alternative = CustomSTTAlternative(
-                text=final_text,
-                language=current_transcribe_language, # Language requested for transcription
-                segments=custom_stt_segments
-            )
+            alternative = CustomSTTAlternative(text=final_text, language=current_transcribe_language, segments=custom_segments)
             return CustomSTTEvent(type="final_result", alternatives=[alternative])
 
         except Exception as e:
             logger.error(f"STT Error during recognition: {e}")
-            error_alternative = CustomSTTAlternative(text=str(e), language=current_transcribe_language)
-            return CustomSTTEvent(type="error", alternatives=[error_alternative])
+            return CustomSTTEvent(type="final_result", alternatives=[])
 
     async def close(self):
         logger.info("CustomSTT close called.")
